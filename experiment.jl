@@ -7,7 +7,7 @@ using Statistics
 
 We have my two silly notions to test
 
-1) weight sharing in the middle layer of the GPT may increase parameter count and accuracy
+1) weight sharing in the middle layer of the GPT may decrease parameter count and increase accuracy
 2) a symmteric decode block may increase stability
 
 symmetric decoding is motivated by the analogy of Attention -> MLP looks like Lie-Trotter style splitting
