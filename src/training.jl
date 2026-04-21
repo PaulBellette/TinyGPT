@@ -1,64 +1,27 @@
-
-function lm_loss_and_accuracy(model, ps, st, x, y, mask)
-    # x:    (T, B) integer token ids
-    # y:    (T, B) integer token ids
-    # mask: (T, B) Bool, true where target is valid (not pad)
-
-    logits, st_new = model(x, ps, st)   # (V, T, B)
+function lm_loss(model, ps, st, d)
+    x, y, mask = d
+    logits, st = model(x, ps, st)   # (V, T, B)
 
     V, T, B = size(logits)
-    @assert size(y) == (T, B)
-    @assert size(mask) == (T, B)
+    N = T * B
 
-    total_loss = 0.0f0
-    total_count = 0
-    total_correct = 0
+    logits2 = reshape(logits, V, N)
+    y2      = reshape(y, N)
+    mask2   = reshape(mask, N)
 
-    for b in 1:B
-        for t in 1:T
-            if mask[t, b]
-                # logits[:, t, b] is length-V
-                logp = NNlib.logsoftmax(logits[:, t, b])
-                total_loss -= logp[y[t, b]]
-                total_count += 1
+    logp = NNlib.logsoftmax(logits2; dims=1)
 
-                pred = argmax(logits[:, t, b])
-                total_correct += (pred == y[t, b])
-            end
-        end
-    end
+    # one-hot targets: (V, N)
+    oh = onehotbatch(y2, 1:V)
 
-    loss = total_loss / total_count
-    acc = total_correct / total_count
+    # pick gold logprobs by reduction instead of scalar indexing
+    gold_logp = sum(logp .* oh; dims=1)   # (1, N)
+    gold_logp = vec(gold_logp)            # (N,)
 
-    return loss, acc, st_new
-end
+    w = Float32.(mask2)
+    loss = -sum(gold_logp .* w) / sum(w)
 
-function train_step!(model, ps, st, opt_state, rng;
-                     batch_size=32,
-                     min_bindings=3,
-                     max_bindings=5)
-
-    batch = generate_batch(rng, batch_size;
-                           min_bindings=min_bindings,
-                           max_bindings=max_bindings)
-
-    x, y = make_lm_batch(batch)
-    mask = make_lm_pad_mask(y)
-
-    loss_fn(ps_local) = begin
-        loss, _, st_new = lm_loss_and_accuracy(model, ps_local, st, x, y, mask)
-        return loss, st_new
-    end
-
-    (loss, st_new), grads = Zygote.withgradient(loss_fn, ps)
-
-    opt_state, ps = Optimisers.update(opt_state, ps, grads[1])
-
-    # recompute accuracy after update is optional; here we use pre-update acc for logging
-    _, acc, _ = lm_loss_and_accuracy(model, ps, st_new, x, y, mask)
-
-    return ps, st_new, opt_state, loss, acc
+    return loss, st, (;)
 end
 
 function answer_only_accuracy(model, ps, st, batch)
@@ -84,6 +47,10 @@ function answer_only_accuracy(model, ps, st, batch)
     return correct / total
 end
 
+function get_device()
+    return CUDA.functional() ? gpu_device() : cpu_device()
+end
+
 function train!(
     model;
     steps=2000,
@@ -92,34 +59,64 @@ function train!(
     seed=42,
     min_bindings=3,
     max_bindings=5,
+    backend = "cpu",
+    validation_interval = 50,
+    early_stop = false,
+    early_stop_threshold = 0.95
 )
+
+    Reactant.set_default_backend(backend)
+    dev = reactant_device()
     rng = MersenneTwister(seed)
 
-    ps, st = LuxCore.setup(rng, model)
-    opt = Optimisers.AdamW(lr)
-    opt_state = Optimisers.setup(opt, ps)
-
+    ps, st = dev(LuxCore.setup(rng, model))
+    opt_state = Training.TrainState(model, ps, st, Optimisers.AdamW(lr))
     losses = Float32[]
-    accs = Float32[]
-
+    test_accuracy = Float32[]
+    batch_timings = []
+    start_time_interval = time_ns()
     for step in 1:steps
-        ps, st, opt_state, loss, acc = train_step!(
-            model, ps, st, opt_state, rng;
-            batch_size=batch_size,
-            min_bindings=min_bindings,
-            max_bindings=max_bindings,
+        batch = generate_batch(rng, batch_size;
+                           min_bindings=min_bindings,
+                           max_bindings=max_bindings)
+        x, y = make_lm_batch(batch)
+        mask = make_lm_pad_mask(y)
+        (_, loss, _, opt_state) = Training.single_train_step!(
+            AutoEnzyme(),
+            lm_loss,
+            (dev(x), dev(y), dev(Array(mask))),
+            opt_state
         )
 
+        loss = cpu_device()(loss)
         push!(losses, loss)
-        push!(accs, acc)
 
-        if step % 50 == 0
-            #do a test of answer only accuracy of a test batch (it is post grad but whatever)
-            test_batch = generate_batch(MersenneTwister(1000000 + step), 256, min_bindings=3, max_bindings=5)
-            test_acc = answer_only_accuracy(model, ps, st, test_batch)
-            println("step=$(step) loss=$(round(loss, digits=4)) acc=$(round(acc, digits=4)) test_acc=$(round(test_acc, digits=4))")
+        if step % validation_interval == 0
+            stop_time_interval = time_ns()
+            time_per_batch_ms = ((stop_time_interval - start_time_interval) / validation_interval) / 1e6
+            push!(batch_timings, time_per_batch_ms)
+            test_batch = generate_batch(
+                MersenneTwister(1000000 + step), 
+                256, 
+                min_bindings=3, 
+                max_bindings=5
+            )
+            test_acc = answer_only_accuracy(
+                model, 
+                cpu_device()(opt_state.parameters), 
+                cpu_device()(Lux.testmode(opt_state.states)), 
+                test_batch
+            )
+            push!(test_accuracy, test_acc)
+            @info("step=$(step), training_loss=$(round(loss, digits=4)), test_acc=$(round(test_acc, digits = 4)), time_per_batch = $(round(time_per_batch_ms, digits = 4)) ms")
+            start_time_interval = time_ns()
+            if early_stop
+                if test_acc > early_stop_threshold
+                    break
+                end
+            end
         end
     end
 
-    return ps, st, losses, accs
+    return cpu_device()(opt_state.parameters), cpu_device()(opt_state.states), losses, test_accuracy, batch_timings
 end
