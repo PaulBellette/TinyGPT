@@ -51,7 +51,7 @@ with the loose intuition that this may produce a more stable update than the asy
 
 ## Conditions
 
-I compared four small models:
+I compared four small models with the same parameter count:
 
 - baseline TinyGPT
 - baseline TinyGPT with symmetric decode block
