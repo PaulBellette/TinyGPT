@@ -58,7 +58,7 @@ I compared four small models with the same parameter count:
 - recycled inner-loop TinyGPT
 - recycled inner-loop TinyGPT with symmetric decode block
 
-For this shakedown run I used 20 random seeds, a maximum of 50,000 training iterations, and early stopping once validation accuracy exceeded 0.9 on the toy grammar task. I recorded the first threshold crossing and the mean batch time for each run.
+For this shakedown run I used 20 random seeds, a maximum of 50,000 training iterations, and early stopping once validation accuracy exceeded 0.9 on the toy grammar task. I recorded the first threshold crossing and the mean batch time for each run. In the following table, success within budget means that greater than 0.9 accuracy was found within 50k iterations.
 
 ## Summary
 
