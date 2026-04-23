@@ -6,8 +6,8 @@ function lm_loss(model, ps, st, d)
     N = T * B
 
     logits2 = reshape(logits, V, N)
-    y2      = reshape(y, N)
-    mask2   = reshape(mask, N)
+    y2 = reshape(y, N)
+    mask2 = reshape(mask, N)
 
     logp = NNlib.logsoftmax(logits2; dims=1)
 
