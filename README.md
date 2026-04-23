@@ -146,9 +146,9 @@ So did this experiment move the state of trasformer technology forward? No. But 
 
 ## Caveats
 
-This is a toy-grammar shakedown, not a serious benchmark, and seed-to-seed variance was large. I would not claim any general transformer result from this.
+This is a toy-grammar shakedown, not a serious benchmark, and seed-to-seed variance was large. Actually, the biggest confounder of any results is this seed to seed variance in performance. I am actually super intrigued by the loss behaviour of this model as it rapidly moves to 0.5 accuracy, settles in and then maybe eventually finds a hole in the loss landscape and jumps up to 1.0 accuracy. It motivates more experiments on weight initialisation and optimisation behavious. That said, I would not claim any general transformer results from these little experiments.
 
-Still, I think it is worth keeping in the repo because it shows the sort of lightweight empirical loop I wanted from this project: have an intuition, make a small ablation, measure something concrete, and leave the result in the open even if it is messy.
+Still, I think they are worth keeping in the repo because it shows the sort of lightweight empirical loop I wanted from this project: have an intuition, make a small ablation, measure something concrete, and leave the result in the open even if it is messy. A research notebook in the wild.
 
 # Acknowledgement
 
